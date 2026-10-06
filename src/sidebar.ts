@@ -672,6 +672,7 @@ export const sidebarTopics: StarlightSidebarTopicsUserConfig = [
 						{ slug: 'platform/self-hosting/managed-direct', label: 'Managed: Direct' },
 						{ slug: 'platform/self-hosting/direct-monorepo-worktrees', label: 'Direct: Monorepo worktrees' },
 						{ slug: 'platform/self-hosting/unmanaged', label: 'Unmanaged' },
+						{ slug: 'platform/self-hosting/external-orchestrators', label: 'External orchestrators' },
 						'platform/self-hosting/monitoring',
 						{ slug: 'platform/self-hosting/reference', label: 'Self-hosted worker reference' },
 						'platform/self-hosting/security-and-networking',
