@@ -183,7 +183,7 @@ backend:
 * `active_deadline_seconds` — Maximum task Job lifetime (Kubernetes `activeDeadlineSeconds`). The worker has no default; the Helm chart defaults `kubernetesBackend.activeDeadlineSeconds` to eight hours.
 * `ttl_seconds_after_finished` — Retention period for failed or orphaned Jobs. Defaults to 24 hours when cleanup is enabled.
 * `workspace_size_limit` — Size limit for the workspace `emptyDir` volume (e.g., `10Gi`).
-* `unschedulable_timeout` — How long a pod may remain unschedulable before the task is failed early. Defaults to `30s`. Set to `0s` to disable the fail-fast behavior.
+* `unschedulable_timeout` — How long a task Pod can stay unschedulable before the worker fails the task. Defaults to `10m`, which leaves time for node autoscaling. Set to `0s` to disable.
 * `pod_template` — Raw Kubernetes PodSpec YAML merged with the worker's required fields at runtime. Use this to configure task pod scheduling, `serviceAccountName`, `imagePullSecrets`, `nodeSelector`, `tolerations`, resources, and environment variables (including `valueFrom.secretKeyRef` for Kubernetes Secrets). Define a container named `task` to customize the main task container directly; otherwise the worker appends its own.
 
 **`backend.direct`:**
