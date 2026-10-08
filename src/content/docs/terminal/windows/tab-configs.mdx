@@ -58,7 +58,7 @@ Saved Tab Configs appear in the `+` menu for quick access. When you hover a Tab 
 
 * **Edit config** — Open the underlying `.toml` file for manual editing. The editor also shows a footer to invoke the **update tab config** skill, so you can describe changes in natural language and have Warp's agent apply them.
 * **Remove** — Remove the Tab Config from the `+` menu.
-* **Make default** — Assign the Tab Config as the default `Cmd+T` action for new tabs.
+* **Make default** — Assign the Tab Config as the default `⌘+T` action for new tabs.
 
 <figure>
 ![Warp's + menu open with a saved screenshots_tab_config entry highlighted, and a sidecar panel showing Make default, Edit config, and Remove action buttons](../../../../assets/terminal/saved-tab-config-menu.png)
@@ -116,6 +116,10 @@ All panes are defined in a flat `[[panes]]` array. The first entry is the root o
 * **`commands`** (optional, array of strings) — commands to run in sequence when the tab opens.
 * **`shell`** (optional, string) — shell executable to use for this pane (e.g. `"pwsh"`, `"zsh"`, `"bash"`, `"fish"`). Only applies to `terminal` and `agent` pane types. If omitted or the specified shell is not installed, the user's default shell is used.
 * **`is_focused`** (optional, bool) — set to `true` on at most one pane to give it initial focus.
+
+:::caution
+Commands in the `commands` array run in sequence, with each command waiting for the previous one to finish. A long-running or interactive command like `ssh` never returns control to the shell, so any commands listed after it don't run in the session. To run commands on a remote host, include them in the `ssh` command itself (e.g., `ssh -t user@host 'cd ~/project && exec $SHELL -l'`).
+:::
 
 #### Split node fields
 
@@ -250,5 +254,5 @@ You can also create a worktree-based Tab Config directly from the `+` menu by cl
 * [Tabs](/terminal/windows/tabs/) — tab management, keyboard shortcuts, and behavior settings
 * [Themes](/terminal/appearance/themes/) — customize the colors used by tab color settings
 * [Working Directory](/terminal/more-features/working-directory/) — how Warp resolves working directories
-* [Third-party CLI agents](/agent-platform/cli-agents/overview/) — use the `"agent"` pane type to open tabs in Agent Mode
+* [Third-party CLI agents](/agents/cli-agents/overview/) — use the `"agent"` pane type to open tabs in Agent Mode
 * [Warp URI Scheme](/terminal/more-features/uri-scheme/) — open Tab Configs via `warp://tab_config/<name>` deeplinks

@@ -1,17 +1,93 @@
 ---
 /**
  * CopyPageButton — Scalar-style dropdown with:
- * - Copy page (copies raw MDX body as markdown)
+ * - Copy page (copies the MDX body as markdown, with imports stripped and
+ *   product-name variables resolved -- see resolveMdxSource below)
+ * - Copy agent prompt (copies a context-appropriate prompt for the page type)
  * - View as Markdown (opens .md URL in new tab)
  * - Export as PDF (window.print)
  */
+import { VARS } from '@data/vars';
+
+// Not global, and applied line by line from the top of the file rather than
+// across the whole body: an MDX component import only ever appears in the
+// leading block, while a code sample can legitimately contain the same shape.
+// A global replace ate `import OpenAI from "openai";` out of the Node example
+// in guides/external-tools/how-to-set-up-ollama.mdx, so the copied snippet no
+// longer ran.
+const IMPORT_LINE = /^import\s+[^\n]*?from\s+['"][^'"]+['"];?\s*$/;
+// The optional leading `$` matters: MDX authors write `{VARS.KEY}` in prose but
+// `${VARS.KEY}` inside JSX template literals, e.g. href={`${VARS.WEB_APP_URL}/runs`}.
+// Matching only the braces leaves the dollar behind and yields `$https://...`.
+const PROSE_TOKEN = /\$?\{VARS\.([A-Z0-9_]+)\}/g;
+const FRONTMATTER_TOKEN = /\{\{([A-Z0-9_]+)\}\}/g;
+
 interface Props {
   body: string;
   title: string;
+  /** Optional custom agent prompt. Overrides all automatic prompt selection when set. */
+  agentPrompt?: string;
 }
-const { body, title } = Astro.props;
-const markdownContent = `# ${title}\n\n${body}`;
+const { body, title, agentPrompt } = Astro.props;
+
+/**
+ * `body` arrives as raw MDX source, so it still carries authoring scaffolding:
+ * `import` statements at the top and unsubstituted `{VARS.KEY}` / `{{KEY}}`
+ * product-name tokens throughout.
+ *
+ * That matters more than it looks. This payload is what "Copy page as Markdown
+ * for LLMs" puts on the clipboard, so without this an assistant reading the
+ * copied text sees the literal string `{VARS.WARP_AUTOMATION_PLATFORM}` instead
+ * of the product name -- worse than the stale name it replaced.
+ *
+ * The sibling `.md` route does not have this problem because
+ * `docs-markdown-integration.js` derives those files from the *rendered* HTML
+ * after the build, by which point Astro has resolved everything. This component
+ * runs during render and only has the source, so it repeats the two cleanups.
+ *
+ * Known gap: raw JSX (`<VideoEmbed />`) and directive syntax (`:::note`) still
+ * pass through here, where the `.md` route renders them properly. The durable
+ * fix is for this button to fetch the page's own `.md` URL on click rather than
+ * carry a second copy of the content.
+ */
+/** Drops the leading `import` block, stopping at the first line of content. */
+function stripLeadingImports(source: string): string {
+  const lines = source.split('\n');
+  let start = 0;
+  while (
+    start < lines.length &&
+    (lines[start].trim() === '' || IMPORT_LINE.test(lines[start]))
+  ) {
+    start++;
+  }
+  return lines.slice(start).join('\n');
+}
+
+function resolveMdxSource(source: string): string {
+  const vars = VARS as unknown as Record<string, string>;
+  return stripLeadingImports(source)
+    .replace(PROSE_TOKEN, (match, key) => vars[key] ?? match)
+    .replace(FRONTMATTER_TOKEN, (match, key) => vars[key] ?? match);
+}
+
+const markdownContent = `# ${title}\n\n${resolveMdxSource(body)}`;
 const pageUrl = Astro.url.href;
+const pathname = Astro.url.pathname;
+
+// Choose a context-appropriate prompt based on the page's URL path.
+// Priority: custom prop > section-specific variant > default.
+function selectAgentPrompt(url: string, path: string): string {
+  if (path.startsWith('/changelog'))
+    return `Summarize what's new and whether I need to take any action: ${url}`;
+  if (path.startsWith('/guides'))
+    return `Walk me through this guide: ${url}`;
+  if (path.startsWith('/reference'))
+    return `Help me use this reference: ${url}`;
+  if (path.includes('troubleshooting'))
+    return `Walk me through resolving this issue: ${url}`;
+  return `Tell me about this feature: ${url}`;
+}
+const agentPromptText = agentPrompt ?? selectAgentPrompt(pageUrl, pathname);
 const prompt = encodeURIComponent(`Read ${pageUrl}. I want to ask questions about it.`);
 const chatgptUrl = `https://chatgpt.com/?q=${prompt}`;
 const claudeUrl = `https://claude.ai/new?q=${prompt}`;
@@ -38,6 +114,18 @@ const claudeUrl = `https://claude.ai/new?q=${prompt}`;
       <div>
         <div class="item-label">Copy page</div>
         <div class="item-desc">Copy page as Markdown for LLMs</div>
+      </div>
+    </button>
+
+    <button class="copy-dropdown-item" id="copy-agent-prompt">
+      {/* Terminal prompt icon — evokes "agent/command" without using a branded logo */}
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="4 17 10 11 4 5"/>
+        <line x1="12" y1="19" x2="20" y2="19"/>
+      </svg>
+      <div>
+        <div class="item-label">Copy agent prompt</div>
+        <div class="item-desc">Copy a prompt to guide you through this page</div>
       </div>
     </button>
 
@@ -101,6 +189,8 @@ const claudeUrl = `https://claude.ai/new?q=${prompt}`;
 
 <!-- Store the markdown content in a hidden element so client JS can read it -->
 <template id="page-markdown-content">{markdownContent}</template>
+<!-- Store the agent prompt in a hidden element so client JS can read it -->
+<template id="agent-prompt-content">{agentPromptText}</template>
 
 <script>
   // `DOMContentLoaded` is used instead of `astro:page-load` because
@@ -112,9 +202,11 @@ const claudeUrl = `https://claude.ai/new?q=${prompt}`;
     const panel = document.getElementById('copy-dropdown-panel');
     const toast = document.getElementById('copy-toast');
     const copyBtn = document.getElementById('copy-as-markdown');
+    const copyPromptBtn = document.getElementById('copy-agent-prompt');
     const viewMdBtn = document.getElementById('view-as-markdown');
     const exportBtn = document.getElementById('export-as-pdf');
     const mdTemplate = document.getElementById('page-markdown-content') as HTMLTemplateElement | null;
+    const promptTemplate = document.getElementById('agent-prompt-content') as HTMLTemplateElement | null;
 
     if (!wrapper || !trigger || !panel) return;
 
@@ -155,6 +247,21 @@ const claudeUrl = `https://claude.ai/new?q=${prompt}`;
         } catch {
           // Permission denied / insecure context — fail silently rather than
           // copy nothing and pretend it worked.
+        }
+      }
+      panel?.classList.remove('open');
+      trigger?.classList.remove('active');
+    });
+
+    // Copy agent prompt
+    copyPromptBtn?.addEventListener('click', async () => {
+      const agentPrompt = promptTemplate?.content.textContent || '';
+      if (agentPrompt) {
+        try {
+          await navigator.clipboard.writeText(agentPrompt);
+          showToast();
+        } catch {
+          // Permission denied / insecure context — fail silently.
         }
       }
       panel?.classList.remove('open');

@@ -9,7 +9,15 @@ Draft a feature documentation page that combines conceptual and procedural conte
 
 ## Workflow
 
-Follow the workflow in `.warp/skills/draft_docs/SKILL.md`, using the **feature-doc template** at `.warp/templates/feature-doc.md`.
+Follow the workflow in `.agents/skills/draft_docs/SKILL.md`, using the **feature-doc template** at `.agents/templates/feature-doc.md`.
+
+## Frontmatter description
+
+One to two sentences, 50-160 characters, saying what the feature does and its primary benefit.
+- ✅ `Control what the agent can do with permission cards, auto-approve, and execution profiles.`
+- ❌ `Documentation for permissions and profiles.`
+
+See "Descriptions by content type" under Frontmatter in `AGENTS.md` for the full rules.
 
 ## Content type rules
 
@@ -19,6 +27,7 @@ These rules are specific to feature documentation pages (from the "Drafting by c
 - Apply the **procedural** rules to the step-by-step sections (motivate steps, expected outcomes, focused steps).
 - **Keep the conceptual and procedural sections clearly separated with distinct headers.** Don't let explanation creep into procedures or vice versa.
 - Title convention: feature name as noun
+- Apply the tone rules in AGENTS.md → Voice & tone: no marketing buzzwords or meta-openers, and no internal architecture the reader can't act on. Run a deletion-only "Cut again" pass before presenting the draft — a short page is a finished page.
 
 ## Heading case
 
@@ -30,6 +39,12 @@ All headings (H1–H4) must use **sentence case**: capitalize only the first wor
 - ❌ `## How It Works`
 - ❌ `## Configuring Your Environment`
 - ❌ `## Agent Mode Settings`
+
+## Product name variables
+
+For any product name in `src/data/vars.ts`, use the variable — never hardcode the string. The template already includes the `[VARS]` instruction block that shows exactly where to add the import. Key reminder:
+- Prose: `{VARS.WARP_AGENT_CLI}` (not "Oz CLI")
+- Frontmatter title/description: `{{WARP_AGENT_CLI}}`
 
 ## Existing examples
 

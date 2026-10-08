@@ -1,11 +1,22 @@
 ---
 name: draft_guide
-description: Draft a new guide page for the Guides section (src/content/docs/guides/). Use for practical, task-oriented walkthroughs that help developers accomplish a specific goal — like setting up a tool, completing a workflow, or learning a technique. Guides focus on the "how" with real prompts and reproducible results, targeting non-branded search queries.
+description: Draft a tutorial for the Guides section (src/content/docs/guides/). Use for a full workflow walkthrough that helps a developer solve a real problem end to end - setting up a tool, completing a workflow, or learning a technique. Tutorials focus on the "how" with real prompts and reproducible results, targeting non-branded search queries. For a five-minute essential-steps path, use draft_quickstart instead.
 ---
 
-# Draft guide page
+# Draft tutorial page
 
-Draft a practical guide that walks a developer through accomplishing a specific goal.
+Draft a tutorial that walks a developer through an entire workflow, start to finish.
+
+## Tutorial or quickstart?
+
+"Guides" is the name of the section, not a content type. It holds both, and the choice is about scope:
+
+- **Quickstart** — about five minutes, ~600 words, essential steps only, for someone who already knows the product. Use `draft_quickstart`.
+- **Tutorial** — a full workflow with context at the decision points, for someone extending a basic understanding to solve a real problem. This skill.
+
+**A tutorial requires that a quickstart already exists** for the product area. Check before drafting. If there is no quickstart, write that first — otherwise the tutorial absorbs setup content that belongs in a shorter page, and readers who only wanted to get started have to wade through the whole workflow.
+
+Tutorials are more conversational than other content: a developer-to-developer conversation that stays accessible to varied technical backgrounds.
 
 ## Workflow
 
@@ -28,15 +39,27 @@ The sidebar nav is defined in `src/sidebar.ts`, which organizes guides into topi
 - **DevOps & infrastructure** — Cloud logs, Docker, Kubernetes, testing, database optimization
 - **Frontend & UI** — Building and refining UI components with coding agents
 
+## Frontmatter description
+
+One to two sentences, 50-160 characters, saying what the reader will build or accomplish, using the non-branded phrasing they would search for.
+- ✅ `Set up Claude Code and run your first agentic coding session from the terminal.`
+- ❌ `A guide to using Claude Code with Warp.`
+
+See "Descriptions by content type" under Frontmatter in `AGENTS.md` for the full rules.
+
 ## Content type rules
 
 These rules are specific to guide pages (from the "Drafting by content type" section of `AGENTS.md`):
 
-- **Titles should be task-oriented** and read like a search query. Use shortened titles in the Astro Starlight nav and full descriptive titles in the article H1.
+- **Titles should be task-oriented** and read like a search query. Use shortened titles in the Astro Starlight nav and full descriptive titles in the article H1. Do not put "tutorial" or "guide" in the title.
 - **For SEO: capture the non-branded query.** Write the title a developer would actually search for, not "How to do X in Warp." Example: "How to set up Claude Code" not "How to set up Claude Code in Warp."
 - All procedural rules apply (focused steps, motivate steps, expected outcomes).
-- Link to relevant feature documentation in the main docs (`docs/`) where concepts need deeper explanation.
-- When a guide has a companion video, the written content should stand alone.
+- **Give real examples, not placeholders.** Do not write "enter a commit message" — supply an appropriate one that matches the preceding steps.
+- **Include troubleshooting.** Name what commonly goes wrong in this workflow and how to recover. This is the clearest line between a tutorial and a quickstart, which only links to existing troubleshooting.
+- **End with a conclusion, then next steps.** Review what the reader built, referring back to the example from the introduction, then give 2-3 actionable next steps.
+- **Do not state an expected completion time.** It varies too much by experience level. (Quickstarts do state one; tutorials do not.)
+- Link to relevant feature documentation in the main docs where concepts need deeper explanation.
+- When a tutorial has a companion video, the written content should stand alone.
 - The optional **Productivity tips** section should showcase Warp features as natural extensions of the workflow — not as a separate pitch.
 
 ## SEO and AEO optimization
@@ -48,6 +71,29 @@ When drafting a guide, check for relevant SEO and AEO data:
 3. **Write the frontmatter `description`** to include the primary target keyword naturally. Keep under 160 characters.
 4. **Frame the title for non-branded search.** The page should answer the user's actual question, with Warp features as the natural solution in the guide body.
 5. **Avoid keyword stuffing.** Preserve high-intent query terms only where they make the guide clearer or more discoverable. Rewrite awkward source-data phrasing into natural developer language.
+
+## Oz CLI and GitHub Actions accuracy
+
+When a guide includes Oz CLI commands or GitHub Actions workflows using `warpdotdev/oz-agent-action`:
+
+- **Verify Oz CLI commands against `/agents/cli/oz-cli/`.** Do not infer flag names or argument formats. Use only flags documented in the CLI reference. When in doubt, link to the reference page instead of showing a command.
+- **`oz-agent-action` input format**: `warp_api_key` is a `with:` input to the action, not an `env:` variable. `GITHUB_TOKEN` goes in `env:`. The correct pattern is:
+  ```yaml
+  - uses: warpdotdev/oz-agent-action@v1
+    with:
+      skill: SKILL_NAME
+      environment: YOUR_OZ_ENVIRONMENT_SLUG
+      warp_api_key: ${{ secrets.WARP_API_KEY }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ```
+- **Every GitHub Actions workflow example that performs write operations must include a `permissions:` block** at the workflow level, before `jobs:`. Use the minimum permissions for the task:
+  - Triage (label/comment on issues): `issues: write`
+  - Spec/implementation (push branches, open PRs): `contents: write`, `pull-requests: write`
+  - Review (post PR comments): `pull-requests: write`
+  Without an explicit `permissions:` block, workflows fail in repositories with restricted default permissions.
+- **`oz secret create` must not include `--value` on the command line.** The `--value` flag exposes secrets in shell history and process arguments. Show `oz secret create --name SECRET_NAME` and note that the CLI prompts for the value interactively.
+- **Slash commands** (`/command-name`) in standalone code fences should use `bash` as the language identifier, consistent with the docs style guide for terminal input.
 
 ## Third-party tool accuracy
 
@@ -66,14 +112,14 @@ Before adding any internal documentation link:
 
 - **Verify the target page exists.** Check `src/sidebar.ts` for sidebar entries and the corresponding file under `src/content/docs/` to confirm the page exists. Do NOT generate plausible-looking URLs to pages that don't exist.
 - **If a target page is planned but not yet published**, link to the closest existing page and add a TODO comment with the intended future path: `<!-- TODO: Update to [future-path] once [page name] is live -->`
-- **For third-party CLI agent pages**, the current paths are under `src/content/docs/agent-platform/cli-agents/` (e.g., `claude-code.mdx`, `codex.mdx`, `opencode.mdx`).
+- **For third-party CLI agent pages**, the current paths are under `src/content/docs/agents/cli-agents/` (e.g., `claude-code.mdx`, `codex.mdx`, `opencode.mdx`).
 
 ## Cross-linking
 
 Every guide should link to:
 - At least one other guide in the Guides section
-- Relevant feature documentation in the main docs (`src/content/docs/` or `src/content/docs/agent-platform/`)
-- If applicable, pages in the Third-Party CLI Agents section (`src/content/docs/agent-platform/cli-agents/`)
+- Relevant feature documentation in the main docs (`src/content/docs/` or `src/content/docs/agents/`)
+- If applicable, pages in the Third-Party CLI Agents section (`src/content/docs/agents/cli-agents/`)
 
 ## Pre-handoff self-review
 

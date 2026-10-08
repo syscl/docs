@@ -1,0 +1,215 @@
+name: Refresh UI paths snapshot
+
+# Triggered in three ways:
+#   1. `repository_dispatch` from warpdotdev/warp when `master` merges a
+#      change under app/src/settings_view/** (source-driven, same-day).
+#   2. A weekly `Friday 15:15 UTC` schedule that reconciles the snapshot's
+#      recorded `source_sha` against the full `master` head used to generate
+#      the snapshot, limiting an unnoticed missed dispatch to seven days. A
+#      no-change reconciliation exits successfully without refreshing.
+#   3. `workflow_dispatch` as the documented manual fallback.
+on:
+  repository_dispatch:
+    types:
+      - settings-ui-changed
+  schedule:
+    - cron: '15 15 * * 5'
+  workflow_dispatch:
+
+# Only WARP_API_KEY is needed here — warpdotdev/warp access and Slack
+# notifications are handled by the Oz cloud agent environment. The
+# reconciliation step additionally needs read access to warpdotdev/warp's
+# commit history, which GH_TOKEN (the default workflow token) covers for a
+# public repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-ui-paths
+  # Do not cancel in-progress runs: a run may be mid-commit when the next
+  # dispatch arrives, leaving a branch with no PR. Each run is fast and
+  # idempotent — if two overlap, the second will simply find no diff.
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile recorded source SHA (scheduled runs only)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      needs_refresh: ${{ steps.compare.outputs.needs_refresh }}
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v4
+
+      - name: Compare recorded source SHA against current master head
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RECORDED_SHA=$(python3 -c "import json; print(json.load(open('.agents/skills/validate_ui_refs/valid_paths.json')).get('source_sha') or '')")
+          LATEST_SHA=$(gh api "repos/warpdotdev/warp/commits/master" --jq .sha)
+          if [ -z "$LATEST_SHA" ]; then
+            echo "::error::could not resolve warpdotdev/warp master HEAD — failing loud rather than silently skipping reconciliation."
+            exit 1
+          fi
+          echo "Recorded source SHA: ${RECORDED_SHA:-<none>}"
+          echo "Current master HEAD: $LATEST_SHA"
+          if [ "$RECORDED_SHA" = "$LATEST_SHA" ]; then
+            echo "Snapshot is already current — no refresh needed."
+            echo "needs_refresh=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_refresh=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  refresh:
+    name: Dispatch Oz cloud agent to refresh UI path snapshot
+    runs-on: ubuntu-latest
+    needs: [reconcile]
+    # Always run for a source dispatch or manual trigger. For the weekly
+    # schedule, run only when reconciliation found the snapshot stale — a
+    # skipped `reconcile` job's output is empty, not "false", so the schedule
+    # branch checks needs_refresh explicitly rather than relying on !=  'false'.
+    if: |
+      always() &&
+      needs.reconcile.result != 'failure' &&
+      (github.event_name != 'schedule' || needs.reconcile.outputs.needs_refresh == 'true')
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v4
+
+      - name: Install Oz CLI
+        run: |
+          curl -sL "https://app.warp.dev/download/cli?os=linux&package=deb&arch=x86_64" -o /tmp/oz.deb
+          sudo dpkg -i /tmp/oz.deb
+
+      - name: Write Oz prompt
+        run: |
+          cat > /tmp/oz_prompt.txt << 'PROMPT'
+          Run the validate_ui_refs skill to refresh the UI path snapshot and fix stale doc references.
+
+          This was triggered by a change to app/src/settings_view/ in warpdotdev/warp.
+
+          Steps:
+          1. Locate warpdotdev/warp. It should be checked out at
+             /workspace/warp in this environment. Ensure it is at the current
+             origin/master HEAD before refreshing. If that path does not exist,
+             clone it:
+               git clone --branch master --depth 1 git@github.com:warpdotdev/warp.git /workspace/warp
+             Otherwise run:
+               git -C /workspace/warp fetch origin master
+               git -C /workspace/warp checkout --detach origin/master
+             Then run:
+               python3 .agents/skills/validate_ui_refs/validate_ui_refs.py \\
+                 --refresh-valid-paths \\
+                 --warp /workspace/warp
+          2. Compare valid_paths.json before and after (strip generated_at from both,
+             then diff). If unchanged, exit — no PR needed.
+          3. If the snapshot changed, run:
+               python3 .agents/skills/validate_ui_refs/validate_ui_refs.py \\
+                 --all --fix --create-pr --slack-notify \\
+                 --slack-channel C09BVK0PL3Y
+             The script auto-fixes high-confidence issues, opens a PR, and posts to
+             #growth-docs if issues remain. BUZZ_SLACK_TOKEN is available in this
+             environment and is used as a fallback for SLACK_BOT_TOKEN.
+          4. After running --refresh-valid-paths, check whether any shared-source-file
+             subpages (Warp Agent, Oz, Profiles, Knowledge, Third party CLI agents,
+             Indexing and projects, Editor and Code Review) now have sub_sections that
+             differ significantly from the last verified values in valid_paths.json.
+             If they do, use computer use (if available) to verify against the live
+             Warp Settings UI following the instructions in:
+             .agents/skills/verify-settings-subsections/SKILL.md
+          5. Report the outcome (PR URL if created, or "no changes" if already up to date).
+
+          Full instructions: .agents/skills/validate_ui_refs/SKILL.md
+          PROMPT
+
+      - name: Dispatch Oz cloud agent
+        id: oz-dispatch
+        env:
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+        run: |
+          OUTPUT=$(oz agent run-cloud \
+            --environment K5KStCm5aYvhfBJb8cHol6 \
+            --skill warpdotdev/docs:validate_ui_refs \
+            --prompt "$(cat /tmp/oz_prompt.txt)")
+          echo "$OUTPUT"
+          RUN_ID=$(echo "$OUTPUT" | grep -oP 'run ID: \K[0-9a-f-]{36}')
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Dispatched cloud agent run: $RUN_ID"
+
+      - name: Wait for Oz run to complete
+        env:
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+        run: |
+          RUN_ID="${{ steps.oz-dispatch.outputs.run_id }}"
+          if [[ -z "$RUN_ID" ]]; then
+            echo "No run ID captured — cannot poll."
+            exit 1
+          fi
+          echo "Polling run $RUN_ID (max 60 min, 30s intervals)..."
+          FINAL_STATUS="timeout"
+          for i in $(seq 1 120); do
+            OUTPUT=$(oz run get "$RUN_ID" 2>/dev/null || echo "")
+            STATUS=$(echo "$OUTPUT" | grep -oP '(?<=\()\w+(?=\))' | head -1 | tr '[:upper:]' '[:lower:]')
+            ELAPSED="$((i * 30 / 60))m$((i * 30 % 60))s"
+            echo "[$ELAPSED] $STATUS"
+            if [[ "$STATUS" == "succeeded" ]]; then
+              FINAL_STATUS="succeeded"
+              break
+            elif [[ "$STATUS" == "failed" || "$STATUS" == "errored" || "$STATUS" == "cancelled" ]]; then
+              FINAL_STATUS="$STATUS"
+              break
+            fi
+            sleep 30
+          done
+          if [[ "$FINAL_STATUS" != "succeeded" ]]; then
+            echo "Oz run did not succeed (status: $FINAL_STATUS)"
+            exit 1
+          fi
+          echo "Oz run completed successfully."
+
+  alert-on-failure:
+    name: Alert Pod-Docs on a failed refresh
+    runs-on: ubuntu-latest
+    needs: [reconcile, refresh]
+    # A dispatch, agent, refresh, or reconciliation failure must be visible
+    # and alerted — it never silently advances the recorded source SHA.
+    # `always()` is required because a failed dependency otherwise skips
+    # this job entirely.
+    if: always() && (needs.reconcile.result == 'failure' || needs.refresh.result == 'failure')
+    steps:
+      - name: Post failure alert to #growth-docs
+        env:
+          BUZZ_SLACK_TOKEN: ${{ secrets.BUZZ_SLACK_TOKEN }}
+          GROWTH_DOCS_SLACK_CHANNEL_ID: ${{ secrets.GROWTH_DOCS_SLACK_CHANNEL_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ -z "$BUZZ_SLACK_TOKEN" ] || [ -z "$GROWTH_DOCS_SLACK_CHANNEL_ID" ]; then
+            echo "::warning::BUZZ_SLACK_TOKEN or GROWTH_DOCS_SLACK_CHANNEL_ID not set — skipping Slack alert. Failed workflow run: $RUN_URL"
+            exit 0
+          fi
+          python3 - <<PYEOF
+          import json, os, urllib.request
+
+          token = os.environ["BUZZ_SLACK_TOKEN"]
+          channel = os.environ["GROWTH_DOCS_SLACK_CHANNEL_ID"]
+          run_url = os.environ["RUN_URL"]
+          event_name = os.environ["EVENT_NAME"]
+          message = (
+              f":rotating_light: Refresh UI paths snapshot failed (trigger: {event_name}). "
+              f"The recorded source SHA was NOT advanced. <{run_url}|View the failed run>."
+          )
+          payload = json.dumps({"channel": channel, "text": message}).encode()
+          req = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage",
+              data=payload,
+              headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+          )
+          with urllib.request.urlopen(req) as resp:
+              result = json.load(resp)
+          if not result.get("ok"):
+              raise SystemExit(f"Slack error: {result.get('error')}")
+          PYEOF
